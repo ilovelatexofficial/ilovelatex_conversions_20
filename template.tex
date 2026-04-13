@@ -1,0 +1,612 @@
+\documentclass[twocolumn]{svjour3}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\begin{document}
+\title{Title Extracted from PDF}
+\author{}
+\institute{}
+\journalname{}
+\date{}
+\maketitle
+\begin{abstract}
+\keywords{}
+\end{abstract}
+% ===== MAIN DOCUMENT CONTENT =====
+
+\section{Introduction}
+Deep learning has emerged as a powerful tool in medical image analysis, enabling significant progress in disease detection, diagnostic support, and patient outcome prediction \cite{ref1}, \cite{ref2}. Convolutional neural networks (CNNs) and other deep architectures have demonstrated remarkable performance across various imaging modalities, including magnetic resonance imaging (MRI), computed tomography (CT), and histopathological imaging. However, the reliability of these models in clinical practice depends heavily on the availability of large and well-curated datasets.
+In reality, the construction of medical datasets faces major challenges. One of the most critical issues is class imbalance. Some diseases or lesions are far more common than others in clinical populations. For example, in oncology imaging datasets, benign findings or prevalent cancer subtypes may dominate, while rare but clinically relevant conditions appear only in a handful of cases \cite{ref3}. This imbalance not only reflects the natural frequency of diseases but is also compounded by the difficulty of acquiring medical images: image collection is costly, requires ethical approval, and expert annotations are time-consuming and labor-intensive.
+Another important factor is redundancy. Imaging modalities such as CT and MRI produce multiple slices for the same patient, where the same lesion may appear repeatedly with minimal differences across adjacent slices. While this artificially inflates dataset size, it does not increase sample diversity. On the contrary, it can bias deep learning models to overfit specific patterns from majority cases, while failing to generalize to rare and atypical conditions \cite{ref4}.
+To address dataset imbalance, the literature has explored several strategies:
+\begin{itemize}
+ \item \textbf{Resampling techniques}, including oversampling of minority classes and undersampling of majority ones \cite{ref5}. Although widely used, oversampling can lead to overfitting minority classes, while undersampling risks discarding valuable clinical information.
+ \item \textbf{Synthetic data generation}, particularly with generative adversarial networks (GANs) or diffusion models, which can create artificial images to balance the dataset \cite{ref6}, \cite{ref7}. However, synthetic samples may lack fine-grained pathological details and introduce distributional shifts.
+ \item \textbf{Cost-sensitive learning}, where loss functions are adapted to penalize errors on rare classes more heavily (e.g., focal loss) \cite{ref8}. These methods improve sensitivity to rare cases but may still struggle when dataset redundancy dominates.
+\end{itemize}
+Despite their contributions, these approaches often fail to simultaneously preserve dataset diversity and reduce redundancy. This motivates the exploration of alternative strategies. In this work, we propose a novel dataset-pruning framework to address class imbalance in medical imaging.
+Unlike oversampling or synthetic data generation, the proposed strategy reduces redundancy in overrepresented classes while preserving the most informative training samples. To achieve this, we first use a VQ-VAE (Vector Quantized Variational Autoencoder) \cite{ref9} to learn compact latent representations of medical images. Each image is then mapped to a latent vector, which captures its main structural and semantic characteristics in a compressed feature space. Building on these latent representations, the proposed framework selectively targets majority classes for pruning. For each majority class, latent vectors are partitioned into clusters in order to capture local intra-class structure and avoid retaining samples only from the densest regions of the distribution. Within each cluster, an SVM-based selection strategy is applied to identify the most informative samples, particularly those lying near the support boundary in latent space, while redundant interior samples are discarded. Minority classes are preserved unchanged in order to avoid further reducing already scarce diagnostic patterns.
+Our proposed approach is designed to achieve two main objectives:
+\begin{enumerate}
+ \item reduce dataset bias by removing redundant majority-class samples that disproportionately influence training;
+ \item improve generalization by preserving informative and structurally diverse samples while maintaining the integrity of minority classes.
+\end{enumerate}
+To evaluate the effectiveness of the proposed method, we conduct experiments on three medical imaging datasets with different levels of complexity and imbalance:
+\begin{itemize}
+ \item \textbf{OASIS}: a relatively simple yet imbalanced dataset, used as a baseline scenario;
+ \item \textbf{COVID-19}: a dataset of intermediate complexity, with greater variability in image appearance and class structure;
+ \item \textbf{HAM10000}: a highly challenging dataset characterized by severe class imbalance and fine-grained visual variability.
+\end{itemize}
+The remainder of this paper is organized as follows. Section 2 reviews related work on dataset imbalance in medical imaging and existing data selection strategies. Section 3 presents the proposed pruning framework based on VQ-VAE latent representations, clustering, and SVM-guided informative sample selection. Section 4 reports the experimental results on the three medical imaging datasets. Section 5 discusses the main findings, their practical implications, and the strengths and limitations of the proposed approach. Finally, Section 6 concludes the paper by summarizing the contributions of this study and outlining directions for future work.
+\section{Related Works}
+Class imbalance is a well-known challenge in medical image analysis, often causing deep learning models to be biased toward majority classes and leading to poor performance on underrepresented classes, which frequently correspond to rare lesions that are difficult for clinicians to detect. To address this issue, the literature typically focuses on two main strategies: data-level solutions, including resampling and synthetic data generation, and algorithm-level solutions, such as cost-sensitive learning and model compression.
+Recent reviews comprehensively address the challenges and solutions for class imbalance in deep learning for medical data. Ghosh et al. \cite{ref10} highlight issues such as majority-class gradient dominance and advocate deep architectures (MLPs, CNNs) with regularization, while Araf et al. \cite{ref11} identify direct cost-sensitive learning (CSL) as superior to resampling for improving sensitivity and AUC in medical diagnosis, whereas Salmi et al. \cite{ref12} categorize methods into data-level (e.g., SMOTE), algorithm-level (e.g., CSL), and hybrid approaches.
+Data-level strategies remain the most widely adopted solutions for handling class imbalance, with methods ranging from traditional resampling to advanced augmentation. Classical oversampling techniques such as SMOTE and its variants have been broadly studied in cancer-related tasks. Khushi et al. \cite{ref13} compared BSMOTE, SMOTE-Tomek, and random oversampling in lung cancer classification with logistic regression, linear SVC, and random forest, showing consistent improvements in balanced accuracy and boosted AUC by +0.156 using BSMOTE with Logistic Regression. Similarly, Krishna et al. \cite{ref14} applied SMOTE to improve sensitivity on an Alzheimer’s dataset, while Aish et al. \cite{ref15} enhanced chronic disease diagnosis by combining SMOTE with bagging ensembles, achieving over 98\% accuracy on stroke detection. Hybrid resampling strategies are also prominent: Gurcan et al. \cite{ref16} introduced SMOTEENN to jointly apply oversampling and undersampling, whereas Bacha et al. \cite{ref17} proposed RE-SMOTEBoost, combining SMOTE with majority-class pruning to improve breast cancer classification. In addition, Sowjanya et al. \cite{ref18} integrated D-SMOTE and BP-SMOTE with stacking ensembles, and Martinez et al. \cite{ref19} used balanced bagging for ophthalmology and pregnancy datasets. For infectious diseases, Mohammedqasim et al. \cite{ref20} combined Hyper-ADASYN with feature selection for COVID-19 detection, achieving 99\% accuracy on a COVID-19 dataset, while Chowdhury et al. \cite{ref21} used gradient boosting with Edited Nearest Neighbors for a COVID-19 dataset. Beyond resampling, augmentation is frequently explored: Saha et al. \cite{ref22} and Alsaidi et al. \cite{ref23} applied traditional augmentations for skin lesions, Zebari et al. \cite{ref24} enhanced brain tumor detection with DenseNet121 and image transformations, achieving an accuracy of 94\%, and Beddiar et al. \cite{ref25} introduced noise-preserving augmentation for COVID-19.
+While resampling modifies existing samples, synthetic data generation explicitly creates new minority-class examples, increasingly through generative models. Recent research by Touazi et al. \cite{ref26} used StyleGAN3-based augmentation in hybrid form with traditional geometric data augmentation (TDA) to handle dataset imbalance across different medical imaging tasks, achieving 94.48\% on a COVID dataset and 89.95\% on HAM10000. In dermatology, Su et al. \cite{ref27} developed STGAN for realistic skin lesion synthesis, achieving 98.23\% and demonstrating the value of GAN-based expansion. In lung cancer, Ding et al. \cite{ref28} introduced LEGAN to generate synthetic malignant cases. Hybrid GAN-based approaches further extend this direction: Suresh et al. \cite{ref29} combined Radius-SMOTE with DCGAN in their E-GAN framework, while Ding et al. \cite{ref30} integrated IBGAN with anomaly detection techniques such as Isolation Forest and SVDD. These generative strategies expand underrepresented classes with diverse and realistic samples, addressing the scarcity of rare pathologies and outperforming traditional oversampling in several tasks.
+Beyond manipulating data, many works tackle imbalance at the algorithmic or model level. Loss-based methods such as the adaptive blended consistency loss of Huynh et al. \cite{ref31} directly adjust optimization objectives for imbalanced skin lesion classification, while feature-level strategies like the metadata-based approach of Adebiyi et al. \cite{ref32} improved performance to 94.11\% accuracy (AUC 0.9426). At the model level, Pan et al. \cite{ref33} introduced OWL, an XGBoost-based framework that achieved an AUC of 85.50\% on PLCO/NLST lung cancer data, and Dubey et al. \cite{ref34} proposed ensemble deep learning for COVID-19 detection. In MR imaging, Cui et al. \cite{ref35} combined deep learning with attention, reaching IoU 0.893 and DSC 0.953 on BUS2017, while Mohan et al. \cite{ref36} enhanced skin lesion classification with DinoV2-Base and explainable AI, achieving 97.45\% accuracy. For gastrointestinal imaging, Yang et al. \cite{ref37} leveraged semi-supervised YOLO, obtaining an 86.4\% F1-score. Parallel to imbalance-handling strategies, research on medical image compression has advanced through generative, transform-based, and model compression approaches. Generative methods include VQ-VAE \cite{ref38}, which attained a 1:10 MRI compression ratio, and Li and Wang’s CycleGAN \cite{ref39}, which preserved over 95\% reconstruction accuracy for X-rays. Despite strong results, challenges remain regarding computational costs, complexity, and subtle feature degradation in GAN-based methods \cite{ref39}.
+\begin{table}[htbp]
+\centering
+\caption{Summary of recent studies addressing class imbalance in medical image tasks}
+\label{tab:related_work_summary}
+\begin{tabular}{lll}
+\hline
+Approach & Dataset & Performance \\
+\hline
+Data-level (Resampling / Augmentation) & & \\
+Hyper-ADASYN + Feature Selection \cite{ref20} & Covid-19 & Accuracy: 99.00\% \\
+SMOTEENN \cite{ref16} & Cancer datasets & Accuracy: 98.19\% \\
+SMOTE + Bagging \cite{ref15} & Stroke & Accuracy: 98.00\% \\
+Balanced Bagging \cite{ref19} & Ophthalmology (AMD), Pregnancy (Preeclampsia) & Accuracy: 97.22\%, Accuracy: 78.65\% \\
+Traditional Augmentation vs GANs \cite{ref23} & Skin lesions & Accuracy: 97.00\% \\
+YOLOv8l-cls + Augmentation \cite{ref22} & Skin lesions & Accuracy: 86.20\% \\
+DenseNet121 + Augmentation \cite{ref24} & Brain tumors & Accuracy: 94.00\% \\
+Noise-preserving Augmentation \cite{ref25} & Covid-19 & Accuracy: 70.00\% \\
+BSMOTE + Logistic Regression \cite{ref13} & Lung cancer (NLST) & AUC: 65.62\% \\
+SMOTE-Tomek + Linear SVC \cite{ref13} & Lung cancer (NLST) & AUC: 65.50\% \\
+SMOTE \cite{ref14} & Neurology datasets & -- \\
+\hline
+Synthetic Data Generation & & \\
+STGAN (GAN-based synthesis) \cite{ref27} & Skin lesions & Accuracy: 98.23\% \\
+LEGAN (GAN-based synthesis) \cite{ref28} & Lung cancer & -- \\
+E-GAN (Radius-SMOTE + DCGAN) \cite{ref29} & Breast cancer & MGM: +8.69 \\
+IBGAN + Isolation Forest + SVDD \cite{ref30} & Hybrid medical datasets & -- \\
+\hline
+Algorithmic: Model-level Methods & & \\
+DinoV2-Base + Explainable AI \cite{ref36} & Skin lesions & Accuracy: 97.45\% \\
+Metadata-based Oversampling \cite{ref32} & Skin lesions & Accuracy: 94.11\% (AUC
+
+AUC: 85.50\%
+YOLO + Semi-supervised Learning \cite{ref37}
+GI tract
+F1-score: 86.40
+Unified Deep Learning + Attention \cite{ref35}
+MR imaging (BUS2017)
+IoU: 0.893, DSC: 0.953
+Ensemble Deep Learning \cite{ref34}
+Covid-19
+Accuracy: +32.05
+Adaptive Blended Consistency Loss \cite{ref31}
+Skin lesions
+Recall: 68.00
+D-SMOTE \& BP-SMOTE + Stacking Ensemble \cite{ref18}
+General medical
+Accuracy: 96--97
+RE-SMOTEBoost (SMOTE + Majority Pruning) \cite{ref17}
+Breast cancer (WOBC)
+F1-score: 93.87
+VQ-VAE (Generative Compression) \cite{ref38},
+MRI
+Accuracy: 87.49\%
+CycleGAN (Generative Compression) \cite{ref39}
+X-ray
+Accuracy: 95\%
+Despite these advances across data-level, synthetic-generation, and model-level methods, several limitations remain. Data augmentation and sampling often risk producing unrealistic minority samples, while algorithmic approaches such as advanced loss functions and semi-supervised models can increase training complexity and computational cost. These challenges highlight the need for approaches that balance strong minority-class performance with greater efficiency. In the following section, we present our proposed method, which addresses these gaps by pruning overrepresented classes while preserving informative samples and comparing this strategy against advanced balancing techniques based on data augmentation and full-dataset training.
+\section{Proposed approach}
+In this section, we introduce our approach for tackling the problem of class imbalance in medical image datasets. Instead of following the common path of oversampling minority classes, we take the opposite direction: we reduce the number of redundant samples in the majority classes. The goal is to create a more balanced dataset while keeping only the most informative examples, which in turn improves the model’s ability to correctly recognize underrepresented classes.
+\textbf{Approach 1 - Uniform pruning:} each majority class is reduced by a fixed ratio, while minority classes are preserved entirely. This ensures that less relevant samples are removed without excessively harming class representation.
+\textbf{Approach 2 - Balancing pruning:} the majority classes are pruned to match the size of the smallest one, resulting in a perfectly balanced dataset. This strategy enforces strict equality across classes, further minimizing imbalance.
+Both strategies are designed to preserve diversity and discriminative power while alleviating the bias caused by class imbalance.
+To ensure robustness and reliability of our results, each approach was evaluated across six independent runs. For each run, we report the mean performance along with the standard deviation to account for variability introduced by the stochastic nature of the pruning process and model training.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure1.png}
+\caption{The proposed dataset pruning approach architecture overview for addressing class imbalance: (1) input images are encoded into discrete latent representations using a VQ-VAE; (2) the dataset is constructed in the discrete latent space based on image characterization; (3) K-means clustering groups semantically similar representations; (4) a One-Class SVM identifies borderline samples within each cluster; redundant majority class instances are pruned based on SVM decision scores; (5) the final balanced dataset preserves informative samples while reducing bias toward majority classes; (6) the pruned dataset is then used to train deep learning models, improving generalization and robustness in downstream classification tasks}
+\label{fig:figure1}
+\end{figure}
+\subsection{Vector Quantized Variational AutoEncoder}
+The Vector Quantized Variational AutoEncoder (VQ-VAE) \cite{ref9} is a type of variational autoencoder that introduces vector quantization to obtain a discrete latent representation, distinguishing itself from traditional VAEs, which produce continuous latent codes. The VQ-VAE uses a codebook, a matrix $e$ of dimensions $K \times D$, where $K$ represents the number of embeddings and $D$ is the dimensionality of each embedding (see Figure~\ref{fig:figure2}). This architecture enables the encoding of data into discrete codes, which helps in learning compact and structured representations. The model consists of three main components:
+An encoder: that maps input data $x$ (such as images) into continuous latent representations $z$.
+A vector quantizer: that transforms these continuous representations into discrete vectors $e_k$ using the codebook, by selecting the closest embedding through minimizing the Euclidean distance:
+\begin{equation}
+\text{quantization } z = \argmin_{e_k \in E} \| z - z_k \|^2
+\label{eq:quantization}
+\end{equation}
+A decoder: that reconstructs the original data from the discrete latent codes.
+The codebook, which contains the learned embeddings, plays a critical role in the quantization process. It allows the continuous output of the encoder to be mapped to discrete codes, facilitating the generation of data from these discrete codes. By using a discrete latent space, VQ-VAE simplifies model optimization and enables the use of generative models based on discrete distributions, such as PixelCNN or other autoregressive models, to model the latent codes.
+One of the key advantages of VQ-VAE is its ability to capture meaningful structural representations in the data, making it particularly useful for high-quality generation tasks, especially in areas like medical imaging and discrete signal modeling.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure2.png}
+\caption{VQ-VAE Architecture: The image is encoded into a grid of latent vectors. These vectors are replaced by the nearest codebook vector at the bottleneck. Finally, the quantized vectors pass through the decoder to reconstruct the image \cite{ref9}.}
+\label{fig:figure2}
+\end{figure}
+\subsection{Feature extraction discretization}
+This process maps continuous latent representations to discrete codebook entries, resulting in a 2D array of code indices, each representing the nearest codebook vector for a corresponding region in the image. These indices represent quantized embeddings that capture salient patterns from the original images in a compact latent form. Let the dataset be defined as:
+\begin{equation}
+\mathcal{D} = \{ x_1, x_2, \dots, x_n \}, \quad x_i \in \mathbb{R}^{h \times w \times c}
+\end{equation}
+After encoding through the VQ-VAE encoder $\text{Enc}(\cdot)$, each image is mapped to a discrete latent representation:
+\begin{equation}
+z_i = \text{Enc}(x_i) \in \mathcal{Z}, \quad z_i \in \mathbb{R}^d
+\end{equation}
+where $z_i$ corresponds to the selected codebook vector from a learned set of embeddings (the codebook) $\mathcal{E} = \{ e_1, e_2, \dots, e_k \} \subseteq \mathbb{R}^d$. These latent codes are used in subsequent steps for clustering, pruning, and classification analysis.
+\subsection{K-means Clustering}
+Starting from the discrete latent representations produced by the VQ-VAE, we consider the set of codebook vectors that are actually used in the dataset:
+\begin{equation}
+\mathcal{E}_{\text{used}} = \{ e_{i_1}, e_{i_2}, \dots, e_{i_m} \} \subseteq \mathcal{E}
+\end{equation}
+where each $e_i$ corresponds to a codebook vector that appears at least once in a latent representation $z_i$.
+The goal is to exploit these latent vectors in order to generate a large number of micro-clusters that are highly homogeneous. To achieve this, we apply the K-means algorithm to $\mathcal{E}_{\text{used}}$, producing the partition: $\{ C_1, C_2, \dots, C_K \}, C_k \in \mathcal{E}_{\text{used}}$, where each cluster $C_k$ is obtained by minimizing the within-cluster variance:
+\begin{equation}
+\min_{C_1, \dots, C_K} \sum_{k=1}^K \sum_{e \in C_k} \| e - \mu_k \|^2, \quad \text{where } \mu_k = \frac{1}{|C_k|} \sum_{e \in C_k} e
+\end{equation}
+with $\mu_k$ being the centroid of cluster $C_k$. By choosing a sufficiently large value of $K$, we ensure that the resulting micro-clusters are highly compact and group together images with very similar latent representations. This strong homogeneity is particularly useful for facilitating the subsequent pruning process.
+\subsection{Pruning}
+After extracting discrete latent features using the VQ-VAE model and clustering them with K-means, we refine the sample selection by integrating a One-Class SVM (OC-SVM) analysis. This process is visually summarized in Figure~\ref{fig:figure3}.
+\textbf{SVM-Based Borderline Detection:} For each cluster $C_k$, we train an OC-SVM to model the internal distribution of its codebook vectors. The SVM solves the following optimization problem:
+\begin{equation}
+\min_{\omega,\rho,\{\xi_e\}} \frac{1}{2} \|w\|^2 + \frac{1}{\nu |C_k|} \sum_{e \in C_k} \xi_e - \rho, \quad \text{subject to } w^\top \phi(e) \geq \rho - \xi_e, \xi_e \geq 0, \forall e \in C_k
+\end{equation}
+where $\phi(e)$ is the kernel-induced feature map, $\nu \in (0,1]$ controls the allowed proportion of outliers, and $\rho$ is the offset of the decision boundary. The decision score is defined as
+\begin{equation}
+B_k = \{ e \in C_k : f_k(e) \leq \epsilon \}, \quad B = \bigcup_{k=1}^K B_k
+\end{equation}
+\textbf{Cross-Cluster Validation:} Each borderline point $x_i \in B_k$ is evaluated across all other cluster-specific SVMs. We define the cross-cluster SVM decision score of point $x_i$ with respect to cluster $C_j$ as:
+\begin{equation}
+\text{ClusterMatch}(x_i) = \arg\max_{j \in \{1,\dots,K\}} w^\top \phi(x_i) - \rho_j,
+\end{equation}
+retain $x_i$ if $\text{ClusterMatch}(x_i) = k$
+\textbf{Near-Boundary Augmentation:} To satisfy a desired proportion of retained samples per cluster, we augment the selected set $B_k$ with additional near-boundary points:
+\begin{equation}
+S_k = B_k \cup \{ x_i \in C_k : \epsilon < f_k(x_i) \leq \delta \}, \quad S = \bigcup_{k=1}^K S_k
+\end{equation}
+where $\epsilon$ defines the strict decision boundary margin, and $\delta > \epsilon$ defines an extended selection margin.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure3.png}
+\caption{Schematic overview of the proposed multi-stage undersampling framework for imbalanced datasets. The pipeline consists of three phases: (Top) Latent space representation and identification of the majority class; (Middle) K-means clustering to decompose the majority class into homogenous subclasses based on feature similarity; and (Bottom) SVM-guided pruning, where support vectors and near-boundary samples are calculated to retain informative data points while removing redundant instances}
+\label{fig:figure3}
+\end{figure}
+\subsubsection{Approach 1: Uniform Pruning}
+Let $\mathcal{C} = \{ C_1, C_2, \dots, C_K \}$ denote the set of classes, and let $N_k = |D_k|$ be the number of samples in class $C_k$, where:
+\begin{equation}
+D_k = \{ x_i \in \mathcal{D} \mid y_i = C_k \}
+\end{equation}
+Let $\mathcal{C}_{\text{min}} \subset \mathcal{C}$ denote the set of minority classes:
+\begin{equation}
+\mathcal{C}_{\text{min}} = \{ C_k \in \mathcal{C} \mid N_k = \min_j N_j \}
+\end{equation}
+In uniform pruning, a fixed pruning ratio $r \in (0, 1]$ is applied to all classes except the minority ones. Thus, the pruned sample count per class is given by:
+\begin{equation}
+S_{\text{uniform}} = \bigcup_{k=1}^K S_k, \quad S_k \subseteq D
+
+\section{Summary of Pruning Behavior Across Seeds for the Majority Classes in the HAM10000 Dataset}
+Table \ref{tab:table6} : Summary of pruning behavior across seeds for the majority classes in the HAM10000 dataset. Results are reported as mean $\pm$ standard deviation.
+\begin{table}
+\centering
+\caption{Summary of pruning behavior across seeds for the majority classes in the HAM10000 dataset. Results are reported as mean $\pm$ standard deviation.}
+\label{tab:table6}
+\begin{tabular}{lll}
+\hline
+Class & Ratio (\%) & CV & BFS \\
+\hline
+25 & 1.589 $\pm$ 0.102 & 0.568 $\pm$ 0.062 & 50 & 2.273 $\pm$ 0.125 & 0.494 $\pm$ 0.060 \\
+75 & 2.522 $\pm$ 0.054 & 0.419 $\pm$ 0.047 & M el & 25 & 1.571 $\pm$ 0.133 & 0.596 $\pm$ 0.026 \\
+50 & 2.192 $\pm$ 0.148 & 0.500 $\pm$ 0.057 & 75 & 2.462 $\pm$ 0.086 & 0.458 $\pm$ 0.043 \\
+N v & 25 & 2.223 $\pm$ 0.070 & 0.954 $\pm$ 0.003 & 50 & 2.283 $\pm$ 0.076 & 0.743 $\pm$ 0.013 \\
+75 & 1.425 $\pm$ 0.015 & 0.265 $\pm$ 0.006 & Clustering on the OASIS dataset \\
+\hline
+\end{tabular}
+\end{table}
+\section{Clustering on the OASIS Dataset}
+Compared with COVID and HAM10000, the OASIS dataset exhibits a more structured and better separated latent organization, as shown in Figure \ref{fig:figure9}. The clusters occupy more distinct regions of the feature space, suggesting more stable intra-class patterns and clearer separation between disease stages. This structure is favorable for pruning because boundary-aware selection can operate on better defined cluster supports while preserving representative samples from each majority class. Table \ref{tab:table5} further shows that VeryMildDemented has a substantially higher Border\% than NonDemented, indicating a more diffuse or transitional latent structure. Table \ref{tab:table8} shows markedly different pruning behavior for the two majority classes. For NonDemented, CV and BFS both decrease rapidly as the retention ratio increases, indicating a quick transition from a diverse, boundary-focused subset toward a more concentrated and interior-oriented selection. In contrast, VeryMildDemented remains strongly boundary-focused at 10\% and 25\%, then shifts more gradually toward lower BFS and CV values at higher retention ratios. These results suggest that, although OASIS exhibits an overall structured latent space, its majority classes still differ substantially in how boundary-adjacent and representative samples are distributed.
+\section{Pruned Training Sets}
+The pruned training sets used in the following experiments are generated with the cluster-wise OC-SVM strategy described in the previous subsection. In brief, majority-class clusters are processed independently: boundary-adjacent samples are selected first according to their OC-SVM margin distance, and the remaining quota is completed through stratified sampling over the non-boundary samples. These yields pruned subsets that preserve both informative boundary patterns and representative cluster coverage. The final pruned training set is obtained by aggregating the retained subsets over all clusters:
+\section{3D PCA Plots}
+The 3D PCA plots illustrated in Figures \ref{fig:figure11}, \ref{fig:figure13}, and \ref{fig:figure12} show representative 3D PCA visualizations from the Covid and OASIS datasets, respectively, each consisting of 30 clusters in total. These selected examples, Clusters 0 and 10 from the Covid dataset from normal and lung opacity classes respectively (11), and Clusters 7 and 0 from the OASIS dataset (12), demonstrate the One-Class SVM-based border selection process. In these plots, black points depict the full distribution of samples within each cluster. Blue points indicate borderline samples, defined by a One-Class SVM decision score within the range of -0.05 to 0.05, highlighting their proximity to the decision boundary and potential informativeness. The red triangles represent the final selected samples, retained after the pruning process to serve as representative points. For both Covid and HAM dataset, compared to the OASIS dataset, the clusters which contain fewer overall points shows concentrated selections driven by proximity to borderline regions, albeit with some inclusion of nearby non-borderline samples. For instance, in Cluster 0 and 10 in Figure \ref{fig:figure11}, borderline points are broadly distributed, with a high overlap between borderline and cluster points. In contrast, the OASIS dataset exhibits clusters with a much higher volume of points, but relatively few lie on the decision boundary as shown in Cluster 9 and 13 in Figure \ref{fig:figure12}, dense distribution of data where only a small points fall near the boundary.
+\begin{table}
+\centering
+\caption{Train set sizes after applying different pruning rates (75\%, 50\%, 25\%) across datasets.}
+\label{tab:table8}
+\begin{tabular}{lll}
+\hline
+Dataset & Class & Total Train & Pruned-75\% & Pruned-50\% & Pruned-25\% \\
+\hline
+COVID-19 & Lung Opacity & 4800 & 1200 & 2400 & 3600 \\
+Normal & 8150 & 2037 & 4075 & 6113 \\
+OASIS & NonDemented & 50848 & & & \\
+\hline
+\end{tabular}
+\end{table}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure9.png}
+\caption{SVM-based pruning for Clusters 5 and 29 for Covis-19 dataset class ‘Normal’. Red points represent all samples within the cluster, green points are the selected samples retained after pruning, and blue points correspond to borderline instances identified by the SVM decision boundary.}
+\label{fig:figure9}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure10.png}
+\caption{SVM-based pruning for Clusters 23 and 14 on OASIS dataset class ‘VeryMildDemented’. Red points represent all samples within the cluster, green points are the selected samples retained after pruning, and blue points correspond to borderline instances identified by the SVM decision boundary.}
+\label{fig:figure10}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure11.png}
+\caption{SVM-based pruning for Clusters 2 and 9 on HAM10000 dataset class ‘NV’. Red points represent all samples within the cluster, green points are the selected samples retained after pruning, and blue points correspond to borderline instances identified by the SVM decision boundary.}
+\label{fig:figure11}
+\end{figure}
+\section{Results of Approach 1: Uniform Pruning}
+Uniform pruning was applied to the majority classes in each dataset using three strategies: 25\%, 50\% and 75\% while maintaining the original class distribution for the remain classes. This straightforward approach serves as a baseline experiment for addressing class imbalance, allowing the evaluation of deep learning models on more balanced datasets. The main objective is to decrease the dominance of majority classes while preserving relative class proportions, providing a reference point for evaluating model performance under more balanced conditions.
+\begin{table}
+\centering
+\caption{Train set sizes after applying different pruning rates (75\%, 50\%, 25\%) across datasets.}
+\label{tab:table8}
+\begin{tabular}{lll}
+\hline
+Dataset & Class & Total Train & Pruned-75\% & Pruned-50\% & Pruned-25\% \\
+\hline
+COVID-19 & Lung Opacity & 4800 & 1200 & 2400 & 3600 \\
+Normal & 8150 & 2037 & 4075 & 6113 \\
+OASIS & NonDemented & 50848 & & & \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Performance Comparison on OASIS Dataset}
+The results are illustrated in Table \ref{tab:table9}. On the OASIS dataset, pruning consistently improved performance across all evaluated architectures compared with transfer learning on the full unbalanced dataset. As shown in Table \ref{tab:table10}, all models achieved very high and redundant. This confirms that the proposed method can effectively remove redundant samples while preserving the informative structure required for accurate classification. The very small standard deviations across runs further indicate that these improvements are stable and reproducible.
+\begin{table}[h]
+\centering
+\caption{Performance comparison on the OASIS dataset under different pruning ratios. Results are reported as mean $\pm$ standard deviation across executions. Bold indicates the best-performing model for each pruning ratio}
+\label{tab:table9}
+\begin{tabular}{|l|l|l|l|l|}
+\hline
+Ratio (\%) & Model & Accuracy & Precision & Recall & F1-score \\
+\hline
+75\% & Xception & 99.80\% $\pm$ 0.07\% & 99.80\% $\pm$ 0.07\% & 99.80\% $\pm$ 0.07\% & 99.80\% $\pm$ 0.07\% \\
+\hline
+75\% & EfficientNet & 99.84\% $\pm$ 0.00\% & 99.84\% $\pm$ 0.00\% & 99.84\% $\pm$ 0.00\% & 99.84\% $\pm$ 0.00\% \\
+\hline
+75\% & VGG & 99.83\% $\pm$ 0.02\% & 99.83\% $\pm$ 0.02\% & 99.83\% $\pm$ 0.02\% & 99.83\% $\pm$ 0.02\% \\
+\hline
+75\% & ResNet & 99.89\% $\pm$ 0.01\% & 99.89\% $\pm$ 0.01\% & 99.89\% $\pm$ 0.01\% & 99.89\% $\pm$ 0.01\% \\
+\hline
+50\% & Xception & 99.67\% $\pm$ 0.05\% & 99.67\% $\pm$ 0.05\% & 99.67\% $\pm$ 0.05\% & 99.67\% $\pm$ 0.05\% \\
+\hline
+50\% & EfficientNet & 99.52\% $\pm$ 0.04\% & 99.52\% $\pm$ 0.04\% & 99.52\% $\pm$ 0.04\% & 99.52\% $\pm$ 0.04\% \\
+\hline
+50\% & VGG & 99.57\% $\pm$ 0.04\% & 99.57\% $\pm$ 0.04\% & 99.57\% $\pm$ 0.04\% & 99.57\% $\pm$ 0.04\% \\
+\hline
+50\% & ResNet & 99.72\% $\pm$ 0.06\% & 99.72\% $\pm$ 0.06\% & 99.72\% $\pm$ 0.06\% & 99.72\% $\pm$ 0.06\% \\
+\hline
+25\% & Xception & 97.97\% $\pm$ 0.15\% & 97.99\% $\pm$ 0.14\% & 97.97\% $\pm$ 0.15\% & 97.94\% $\pm$ 0.16\% \\
+\hline
+25\% & EfficientNet & 97.80\% $\pm$ 0.02\% & 97.80\% $\pm$ 0.01\% & 97.80\% $\pm$ 0.02\% & 97.79\% $\pm$ 0.02\% \\
+\hline
+\end{tabular}
+\end{table}
+\begin{table}[h]
+\centering
+\caption{Table caption}
+\label{tab:table10}
+\begin{tabular}{|l|l|l|l|l|}
+\hline
+Ratio (\%) & Model & Accuracy & Precision & Recall & F1-score \\
+\hline
+75\% & Xception & 99.80\% $\pm$ 0.07\% & 99.80\% $\pm$ 0.07\% & 99.80\% $\pm$ 0.07\% & 99.80\% $\pm$ 0.07\% \\
+\hline
+75\% & EfficientNet & 99.84\% $\pm$ 0.00\% & 99.84\% $\pm$ 0.00\% & 99.84\% $\pm$ 0.00\% & 99.84\% $\pm$ 0.00\% \\
+\hline
+75\% & VGG & 99.83\% $\pm$ 0.02\% & 99.83\% $\pm$ 0.02\% & 99.83\% $\pm$ 0.02\% & 99.83\% $\pm$ 0.02\% \\
+\hline
+75\% & ResNet & 99.89\% $\pm$ 0.01\% & 99.89\% $\pm$ 0.01\% & 99.89\% $\pm$ 0.01\% & 99.89\% $\pm$ 0.01\% \\
+\hline
+50\% & Xception & 99.67\% $\pm$ 0.05\% & 99.67\% $\pm$ 0.05\% & 99.67\% $\pm$ 0.05\% & 99.67\% $\pm$ 0.05\% \\
+\hline
+50\% & EfficientNet & 99.52\% $\pm$ 0.04\% & 99.52\% $\pm$ 0.04\% & 99.52\% $\pm$ 0.04\% & 99.52\% $\pm$ 0.04\% \\
+\hline
+50\% & VGG & 99.57\% $\pm$ 0.04\% & 99.57\% $\pm$ 0.04\% & 99.57\% $\pm$ 0.04\% & 99.57\% $\pm$ 0.04\% \\
+\hline
+50\% & ResNet & 99.72\% $\pm$ 0.06\% & 99.72\% $\pm$ 0.06\% & 99.72\% $\pm$ 0.06\% & 99.72\% $\pm$ 0.06\% \\
+\hline
+25\% & Xception & 97.97\% $\pm$ 0.15\% & 97.99\% $\pm$ 0.14\% & 97.97\% $\pm$ 0.15\% & 97.94\% $\pm$ 0.16\% \\
+\hline
+25\% & EfficientNet & 97.80\% $\pm$ 0.02\% & 97.80\% $\pm$ 0.01\% & 97.80\% $\pm$ 0.02\% & 97.79\% $\pm$ 0.02\% \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Results}
+97.80\% $\pm$ 0.02\%
+97.80\% $\pm$ 0.01\%
+97.80\% $\pm$ 0.02\%
+97.79\% $\pm$ 0.02\%
+\section{Results}
+VGG
+98.25\% $\pm$ 0.09\%
+98.25\% $\pm$ 0.10\%
+98.25\% $\pm$ 0.09\%
+98.24\% $\pm$ 0.10\%
+\section{Results}
+ResNet
+98.71\% $\pm$ 0.16\%
+98.71\% $\pm$ 0.16\%
+98.71\% $\pm$ 0.16\%
+98.70\% $\pm$ 0.16\%
+\begin{table}
+\centering
+\caption{Performance comparison on the COVID dataset under different pruning ratios. Results are reported as mean $\pm$ standard deviation across executions. Bold indicates the best-performing model for each pruning ratio.}
+\hline
+Ratio & (\%) & Model & Accuracy & Precision & Recall & F1-score \\
+\hline
+75\% & Xception & 95.30\% $\pm$ 0.30\% & 95.33\% $\pm$ 0.26\% & 95.30\% $\pm$ 0.30\% & 95.29\% $\pm$ 0.31\% \\
+75\% & VGG & 95.67\% $\pm$ 0.25\% & 95.68\% $\pm$ 0.25\% & 95.67\% $\pm$ 0.25\% & 95.67\% $\pm$ 0.25\% \\
+75\% & EfficientNet & 95.21\% $\pm$ 0.12\% & 95.21\% $\pm$ 0.12\% & 95.21\% $\pm$ 0.12\% & 95.20\% $\pm$ 0.12\% \\
+75\% & ResNet & 96.39\% $\pm$ 1.60\% & 96.40\% $\pm$ 1.60\% & 96.39\% $\pm$ 1.60\% & 96.39\% $\pm$ 1.60\% \\
+50\% & Xception & 94.99\% $\pm$ 0.13\% & 94.99\% $\pm$ 0.12\% & 94.99\% $\pm$ 0.13\% & 94.99\% $\pm$ 0.13\% \\
+50\% & VGG & 95.31\% $\pm$ 0.19\% & 95.31\% $\pm$ 0.18\% & 95.31\% $\pm$ 0.19\% & 95.31\% $\pm$ 0.19\% \\
+50\% & EfficientNet & 94.83\% $\pm$ 0.29\% & 94.82\% $\pm$ 0.29\% & 94.83\% $\pm$ 0.29\% & 94.81\% $\pm$ 0.30\% \\
+50\% & ResNet & 95.58\% $\pm$ 0.25\% & 95.58\% $\pm$ 0.26\% & 95.58\% $\pm$ 0.25\% & 95.57\% $\pm$ 0.25\% \\
+25\% & Xception & 94.36\% $\pm$ 0.19\% & 94.36\% $\pm$ 0.18\% & 94.36\% $\pm$ 0.19\% & 94.34\% $\pm$ 0.19\% \\
+25\% & VGG & 94.50\% $\pm$ 0.15\% & 94.49\% $\pm$ 0.14\% & 94.50\% $\pm$ 0.15\% & 94.47\% $\pm$ 0.16\% \\
+25\% & EfficientNet & 94.24\% $\pm$ 0.32\% & 94.22\% $\pm$ 0.32\% & 94.24\% $\pm$ 0.32\% & 94.22\% $\pm$ 0.32\% \\
+25\% & ResNet & 95.02\% $\pm$ 0.22\% & 95.01\% $\pm$ 0.22\% & 95.02\% $\pm$ 0.22\% & 95.00\% $\pm$ 0.23\% \\
+\hline
+\end{table}
+\section{Results on HAM10000 Dataset}
+In contrast, on the HAM10000 dataset, pruning yielded more moderate benefits than on OASIS and COVID, reflecting the higher complexity and more severe imbalance of this benchmark.
+\begin{table}
+\centering
+\caption{Performance comparison on the HAM10000 dataset under different pruning ratios. Results are reported as mean $\pm$ standard deviation across executions. Bold indicates the best-performing model for each pruning ratio.}
+\hline
+Ratio & (\%) & Model & Accuracy & Precision & Recall & F1-score \\
+\hline
+75\% & Xception & 83.66\% $\pm$ 0.30\% & 83.67\% $\pm$ 0.26\% & 83.66\% $\pm$ 0.30\% & 83.65\% $\pm$ 0.31\% \\
+75\% & VGG & 82.17\% $\pm$ 0.25\% & 82.18\% $\pm$ 0.25\% & 82.17\% $\pm$ 0.25\% & 82.17\% $\pm$ 0.25\% \\
+75\% & EfficientNet & 83.83\% $\pm$ 0.12\% & 83.83\% $\pm$ 0.12\% & 83.83\% $\pm$ 0.12\% & 83.82\% $\pm$ 0.12\% \\
+75\% & ResNet & 85.28\% $\pm$ 1.60\% & 85.29\% $\pm$ 1.60\% & 85.28\% $\pm$ 1.60\% & 85.28\% $\pm$ 1.60\% \\
+50\% & Xception & 83.44\% $\pm$ 0.13\% & 83.44\% $\pm$ 0.12\% & 83.44\% $\pm$ 0.13\% & 83.44\% $\pm$ 0.13\% \\
+50\% & VGG & 82.51\% $\pm$ 0.19\% & 82.51\% $\pm$ 0.18\% & 82.51\% $\pm$ 0.19\% & 82.51\% $\pm$ 0.19\% \\
+50\% & EfficientNet & 83.21\% $\pm$ 0.29\% & 83.20\% $\pm$ 0.29\% & 83.21\% $\pm$ 0.29\% & 83.19\% $\pm$ 0.30\% \\
+50\% & ResNet & 84.54\% $\pm$ 0.25\% & 84.54\% $\pm$ 0.26\% & 84.54\% $\pm$ 0.25\% & 84.53\% $\pm$ 0.25\% \\
+25\% & Xception & 82.91\% $\pm$ 0.19\% & 82.91\% $\pm$ 0.18\% & 82.91\% $\pm$ 0.19\% & 82.89\% $\pm$ 0.19\% \\
+25\% & VGG & 82.04\% $\pm$ 0.15\% & 82.03\% $\pm$ 0.14\% & 82.04\% $\pm$ 0.15\% & 82.01\% $\pm$ 0.16\% \\
+25\% & EfficientNet & 82.61\% $\pm$ 0.32\% & 82.59\% $\pm$ 0.32\% & 82.61\% $\pm$ 0.32\% & 82.59\% $\pm$ 0.32\% \\
+25\% & ResNet & 81.58\% $\pm$ 0.22\% & 81.57\% $\pm$ 0.22\% & 81.58\% $\pm$ 0.22\% & 81.56\% $\pm$ 0.23\% \\
+\hline
+\end{table}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure.png}
+\caption{Confusion matrices of the models trained after OASIS uniform pruning (50%): Approach 1.}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure.png}
+\caption{Confusion matrices of the models trained after Covid-19 uniform pruning (50%): Approach 1.}
+\end{figure}
+
+\section{Results of Pruning on HAM10000}
+95.01\% $\pm$ 0.22\%
+95.02\% $\pm$ 0.22\%
+95.00\% $\pm$ 0.23\%
+In contrast, on the HAM10000 dataset, pruning yielded more moderate benefits than on OASIS and COVID, reflecting the higher complexity and more severe imbalance of this benchmark. As shown in Table \ref{tab:table12}, all models maintained competitive performance after pruning, with accuracy, precision, recall, and F1-score remaining closely aligned across settings. The best results were obtained when retaining 75\% of the majority-class samples, where ResNet achieved the highest accuracy (85.28\%), followed by EfficientNet (83.83\%), Xception (83.66\%), and VGG (82.17\%). At 50\% retention, performance decreased slightly but remained stable overall, with ResNet again providing the best result at 84.54\%. Under more aggressive pruning at 25\% retention, all models showed a clearer decline, although ResNet still achieved the strongest performance at 81.58\%.
+\begin{table}[h]
+\centering
+\caption{Performance comparison on the HAM10000 dataset under different pruning ratios. Results are reported as mean $\pm$ standard deviation across executions. Bold indicates the best-performing model for each pruning ratio.}
+\label{tab:table12}
+\begin{tabular}{|l|l|l|l|l|}
+\hline
+\textbf{Ratio} & \textbf{Model} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-score} \\
+\hline
+\hline
+\textbf{75\%} & Xception & 83.66\% $\pm$ 0.62\% & 83.17\% $\pm$ 0.26\% & 83.66\% $\pm$ 0.62\% & 83.03\% $\pm$ 0.80\% \\
+\hline
+\textbf{75\%} & EfficientNet & 83.83\% $\pm$ 0.16\% & 83.38\% $\pm$ 0.34\% & 83.83\% $\pm$ 0.16\% & 83.02\% $\pm$ 0.53\% \\
+\hline
+\textbf{75\%} & VGG & 82.17\% $\pm$ 0.57\% & 81.36\% $\pm$ 0.94\% & 82.17\% $\pm$ 0.57\% & 81.36\% $\pm$ 0.15\% \\
+\hline
+\textbf{75\%} & ResNet & 85.28\% $\pm$ 0.74\% & 84.76\% $\pm$ 0.81\% & 85.28\% $\pm$ 0.74\% & 84.77\% $\pm$ 0.84\% \\
+\hline
+\textbf{50\%} & Xception & 82.62\% $\pm$ 0.78\% & 81.50\% $\pm$ 0.86\% & 82.62\% $\pm$ 0.78\% & 81.63\% $\pm$ 0.87\% \\
+\hline
+\textbf{50\%} & EfficientNet & 82.19\% $\pm$ 0.65\% & 81.09\% $\pm$ 0.47\% & 82.19\% $\pm$ 0.65\% & 81.35\% $\pm$ 0.59\% \\
+\hline
+\textbf{50\%} & VGG & 81.90\% $\pm$ 0.86\% & 81.06\% $\pm$ 1.05\% & 81.90\% $\pm$ 0.86\% & 81.08\% $\pm$ 1.04\% \\
+\hline
+\textbf{50\%} & ResNet & 84.54\% $\pm$ 0.53\% & 84.00\% $\pm$ 0.51\% & 84.54\% $\pm$ 0.53\% & 83.97\% $\pm$ 0.55\% \\
+\hline
+\textbf{25\%} & Xception & 79.73\% $\pm$ 0.63\% & 78.54\% $\pm$ 0.72\% & 79.73\% $\pm$ 0.63\% & 78.56\% $\pm$ 0.44\% \\
+\hline
+\textbf{25\%} & EfficientNet & 78.62\% $\pm$ 0.91\% & 77.36\% $\pm$ 1.12\% & 78.62\% $\pm$ 0.91\% & 77.11\% $\pm$ 1.03\% \\
+\hline
+\textbf{25\%} & VGG & 77.53\% $\pm$ 1.16\% & 76.75\% $\pm$ 1.08\% & 77.53\% $\pm$ 1.16\% & 76.51\% $\pm$ 1.06\% \\
+\hline
+\textbf{25\%} & ResNet & 81.58\% $\pm$ 0.58\% & 81.16\% $\pm$ 0.66\% & 81.58\% $\pm$ 0.58\% & 80.75\% $\pm$ 0.63\% \\
+\hline
+\end{tabular}
+\end{table}
+Figure \ref{fig:figure12}: Confusion matrices of the models trained after Covid-19 uniform pruning (50\%): Approach 1.
+\section{Results of Approach 2: Dataset Balancing}
+Results of approach 2: Dataset balancing
+In the second approach, multiple selection configurations were applied to the Covid, OASIS, and HAM10000 datasets to reduce the size of major classes. This strategy was chosen to explore how different degrees of pruning affect class balance, providing insights into the optimal trade-off between dataset size and class uniformity. Balanced pruning was applied differently across the three datasets in order to account for their specific class distributions, as summarized in Table \ref{tab:table13}.
+For COVID-19, two strategies were compared: a more aggressive setting in which the majority class (Normal) was reduced to match the true minority class (Viral Pneumonia), and a less aggressive setting in which both the majority and intermediate class (Lung Opacity) were aligned to a larger pre-minority class. For OASIS, the largest class, NonDemented, was reduced from 50,848 to 5,075 images (10\% retention), while VeryMildDemented and ModerateDemented were preserved and MildDemented was reduced by 50\%. For HAM10000, pruning was applied selectively according to class size: the dominant class nv was reduced to 10\% of its original size, mel and bkl were reduced to 40\%, and the minority classes were fully retained.
+Overall, these balancing strategies were designed to reduce the dominance of overrepresented classes while preserving enough informative variability to support robust model learning. Table \ref{tab:table13} shows that the effect of balanced pruning differs across datasets and architectures.
+On the COVID-19 dataset, VGG achieved the best overall performance, with 95.18\% accuracy, 95.21\% precision, 95.18\% recall, and 95.14\% F1-score, followed closely by ResNet at 95.02\% accuracy. Xception and EfficientNet also produced strong results, reaching 94.73\% and 94.35\% accuracy, respectively.
+These results indicate that balanced pruning preserves high classification performance on COVID-19 across all evaluated models. For the OASIS dataset, balanced pruning remained effective, with all models maintaining high performance around 95\%–96\%. ResNet achieved the best overall result with 96.37\% accuracy, followed by VGG and Xception (96.33\% each), and EfficientNet (95.03\%).
+The close agreement between accuracy, precision, recall, and F1-score indicates balanced and stable classification behavior across architectures. These results suggest that, despite the strong reduction of the NonDemented class, the proposed balanced pruning strategy preserves the most informative samples and removes substantial redundancy while maintaining strong predictive performance.
+On HAM10000, the overall performance was lower for all architectures, reflecting the greater difficulty of the dataset. Under balanced pruning, ResNet achieved the best results, with 76.26\% accuracy, 81.31\% precision, 76.26\% recall, and 76.85\% F1-score, followed by EfficientNet at 72.17\% accuracy, while Xception and VGG obtained 70.79\% and 69.58\%, respectively.
+This more limited gain is consistent with the cluster-level pruning behavior reported in Table \ref{tab:table7}.
+\begin{table}[h]
+\centering
+\caption{Performance comparison of models under balanced pruning across datasets.}
+\label{tab:table13}
+\begin{tabular}{|l|l|l|l|l|}
+\hline
+\textbf{Dataset} & \textbf{Model} & \textbf{Accuracy (\%)} & \textbf{Precision (\%)} & \textbf{Recall (\%)} & \textbf{F1-score (\%)} \\
+\hline
+\hline
+\textbf{HAM10000} & Xception & 70.79 $\pm$ 0.72 & & & \\
+\hline
+\textbf{HAM10000} & EfficientNet & 72.17 $\pm$ 0.65 & & & \\
+\hline
+\textbf{HAM10000} & VGG & 69.58 $\pm$ 1.16 & & & \\
+\hline
+\textbf{HAM10000} & ResNet & 76.26 $\pm$ 0.58 & & & \\
+\hline
+\end{tabular}
+\end{table}
+Figure \ref{fig:figure14}: Confusion matrices of the models trained after HAM10000 uniform pruning (50\%): Approach 1.
+
+\section{Comparison with Baseline and Data Augmentation Approaches}
+To further evaluate the effectiveness of the proposed pruning strategy, Table \ref{tab:13} compares the ResNet model under our pruning framework with baseline transfer learning (TL), which applies transfer learning on the full unbalanced dataset, and recent data augmentation approaches (Touazi et al. 2025), including traditional data augmentation (TDA), GAN-based augmentation, and hybrid methods combining GANs and TDA. For the OASIS dataset, data augmentation is not required because of the large dataset size; therefore, the comparison is limited to the baseline TL setting.
+\begin{table}
+\centering
+\caption{Performance of ResNet across different approaches used in previous studies}
+\label{tab:13}
+\begin{tabular}{lll}
+\hline
+Dataset & Approach & Accuracy & F1 \\
+\hline
+COVID-19 & Baseline TL & 82.37\% & 87.38\% \\
+& TDA (Geometric) & 94.40\% & 94.37\% \\
+& GAN (Balanced Dataset) & 94.33\% & 94.31\% \\
+& Hybrid (GAN + TDA) & & \\
+\hline
+\end{tabular}
+\end{table}
+The results across the three datasets confirm the effectiveness of the proposed pruning strategy. On the COVID-19 dataset, pruning with ResNet achieved 96.39\% accuracy and 96.39\% F1-score, clearly outperforming the baseline TL setting (82.37\% accuracy, 87.38\% F1-score) as well as the TDA, GAN, and hybrid augmentation approaches. This indicates that, for COVID-19, pruning is not only an effective balancing mechanism but also a highly competitive alternative to synthetic augmentation. On the HAM10000 dataset, pruning with ResNet achieved 85.28\% accuracy and 84.77\% F1-score. This clearly improved over the baseline TL results (83.00\% accuracy and 78.00\% F1-score) and matched the GAN-based approach in accuracy, although it remained slightly below the hybrid augmentation strategy, which achieved the best overall performance. These results suggest that, for a highly heterogeneous and severely imbalanced dataset such as HAM10000, pruning alone provides meaningful gains but is not sufficient to fully surpass stronger augmentation-based balancing schemes.
+\subsection{Results on the OASIS Dataset}
+The most pronounced improvement was observed on the OASIS dataset, where pruning raised ResNet performance from 76.70\% accuracy and 67.30\% F1-score under baseline TL to 99.89\% for both metrics. This substantial increase indicates that OASIS contains considerable redundancy in its majority classes and that pruning can remove a large portion of the data while preserving the most informative samples. Overall, these findings show that pruning is an effective strategy for reducing class imbalance and improving classification performance. Its benefit is strongest on structured datasets with high redundancy, as in OASIS, remains highly competitive on COVID-19, and is more moderate on HAM10000, where the greater visual complexity and class overlap limit the gains achievable through pruning alone.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure.png}
+\caption{Confusion matrices of the models trained after OASIS dataset pruning: Approach 2.}
+\label{fig:15}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure.png}
+\caption{Confusion matrices of the models trained after HAM10000 dataset balancing: Approach 2.}
+\label{fig:17}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{figure.png}
+\caption{Confusion matrices of the models trained after Covid-19 dataset pruning: Approach 2.}
+\label{fig:18}
+\end{figure}
+The bkl and mel classes show very high Border\% values (around 95\%), indicating that most samples lie close to cluster boundaries, which reflects a highly complex and overlapping latent structure. In contrast, the dominant nv class has a lower Border\% (about 43\%) and a clearer transition from boundary-focused to interior-focused selection as the retention ratio increases. These patterns suggest that HAM10000 contains both compact and highly diffuse class structures, making pruning less effective than in more organized datasets.
+For the HAM10000 dataset, pruning was applied to serve imbalance in class distribution composed of seven diagnostic classes with small dataset size. The largest class (nv) contained 5364 images, while the smallest, such as df and vasc, had fewer than 100 samples. This resulted in imbalance ratios exceeding 50:1 in some cases, meaning the model would see over 50 examples from a dominant class for every 1 example from a minority class. To address class imbalance in the HAM10000 dataset without severely reducing data diversity, we implemented a selective pruning strategy that reduced the size of overrepresented classes by varying degrees, ranging from 10\% to 80\%, depending on their initial volumes. For example, the largest class, Nv, was pruned to 10\% of its original size (from 5364 to 529 images), while Mel and Bkl were reduced to 40\%. Minority classes such as df, Akiec, bcc, and vasc were fully retained (100\%). This approach brought the class imbalance ratio significantly closer to 5:1 (from more than 50:1 in the unbalanced set), achieving a better compromise between preserving sufficient representative samples from the dominant classes and enhancing the visibility of underrepresented ones during training. The results obtained demonstrate competitive performance, with results achieved 76.46\% accuracy, 80.75\% precision, 76.46\% recall, and 77.80 F-score using ResNet, which initially underperformed on the full dataset. Similar levels of performance were observed for other architectures such as Xception and EfficientNet, while VGG showed a slight decrease in performance compared to the others (see Table \ref{tab:13}).
+\textbf{Table \ref{tab:13} shows the performance of ResNet across different approaches used in previous studies.}
+\textit{The results confirm the effectiveness of the proposed pruning strategy, which achieved competitive performance on the COVID-19, HAM10000, and OASIS datasets.}
+
+\section{Results}
+\subsection{Performance Comparison}
+\begin{table}
+\centering
+\caption{Performance Comparison}
+\begin{tabular}{lll}
+\hline
+Method & Accuracy & F1-score \\
+\hline
+GAN (Balanced Dataset) & 94.37\% & - \\
+Hybrid (GAN + TDA) & 95.96\% & - \\
+Our best approach & 96.39\% & - \\
+\hline
+Baseline TL & 83.00\% & - \\
+TDA (Geometric) & 84.49\% & - \\
+GAN (Balanced Dataset) & 85.28\% & - \\
+Our best approach & 85.28\% & - \\
+Hybrid (GAN + TDA) & 86.43\% & - \\
+\hline
+\end{tabular}
+\end{table}
+This study investigated pruning as a data-centric strategy for handling class imbalance in medical image classification. The analysis was conducted on three datasets with increasing difficulty: OASIS, a relatively structured four-class MRI dataset with substantial redundancy in the majority classes; COVID-19, a smaller four-class dataset with more subtle inter-class differences; and HAM10000, a seven-class dermoscopic dataset characterized by severe imbalance and high visual heterogeneity.
+\subsection{Effectiveness of Pruning}
+The results obtained with uniform pruning show that the impact of pruning depends strongly on dataset structure. For OASIS and COVID-19, pruning consistently improved performance across all evaluated architectures. On OASIS, the best results were obtained when retaining 75\% of the majority-class samples, where ResNet reached 99.89\% accuracy and 99.89\% F1-score, while even the most aggressive setting-maintained performance above 97.8\% for all models.
+\subsection{Comparison with Baseline Transfer Learning}
+The comparison with baseline transfer learning and augmentation-based approaches further supports the relevance of pruning. For COVID-19, the best pruning configuration with ResNet achieved 96.39\% accuracy and 96.39\% F1-score, outperforming the baseline TL setting and also exceeding the reported TDA, GAN, and hybrid augmentation methods.
+\subsection{Conclusion}
+In this work, we introduced an automated data-pruning framework that addresses class imbalance in medical imaging by combining latent-space clustering with SVM-guided sample selection. Experimental results across three heterogeneous medical imaging datasets demonstrate the robustness and scalability of our approach. Pruning up to 75\% of majority-class samples leads to minimal performance degradation, and in several cases, even improves classification accuracy compared to training on the full dataset.
+\section{Discussion}
+These results indicate that pruning can serve as a strong alternative to augmentation in structured datasets, while in more complex datasets it remains competitive but may require additional support from complementary balancing techniques. Overall, the results show that pruning is most effective when the majority classes contain substantial redundancy and when the latent structure is sufficiently organized to allow informative samples to be retained after reduction.
+\section{Future Work}
+Future work should therefore explore adaptive pruning rules that explicitly account for class complexity, latent-space overlap, and minority-class scarcity, as well as hybrid frameworks that combine pruning with augmentation in a complementary manner.
+
+% ===== REFERENCES =====
+
+\documentclass{article}
+\usepackage{url}
+\begin{document}
+\bibitem[ref1]{ref1}
+G. Litjens , T. Kooi, B. E. Bejnordi , A. A. A. Setio , F. Ciompi , M. Ghafoorian , J. A. van der Laak, B. van Ginneken, and C. I. Sánchez, \url{https://doi.org/10.1016/j.media.2017.01.003}, “A survey on deep learning in medical image analysis,” Med. Image Anal., vol. 42, pp. 60–88, 2017.
+\bibitem[ref2]{ref2}
+D. Shen, G. Wu, and H.-I. Suk, \url{https://doi.org/10.1146/annurev-bioeng-060116-031609}, “Deep learning in medical image analysis,” Annu. Rev. Biomed. Eng., vol. 19, pp. 221–248, 2017.
+\bibitem[ref3]{ref3}
+V. Cheplygina , M. de Bruijne , and J. P. Pluim, \url{https://doi.org/10.1016/j.media.2019.02.004}, “Not-so-supervised: A survey of semi-supervised, multi-instance, and transfer learning in medical image analysis,” Med. Image Anal., vol. 54, pp. 280–296, 2019.
+\bibitem[ref4]{ref4}
+N. Tajbakhsh, L. Jeyaseelan, Q. Li, J.-C. Chiang, Z. Wu, and X. Ding, \url{https://doi.org/10.1016/j.media.2020.101693}, “Embracing imperfect datasets: A review of deep learning solutions for medical image segmentation,” Med. Image Anal., vol. 63, Art. no. 101693, 2020.
+\bibitem[ref5]{ref5}
+H. He and E. A. Garcia, \url{https://doi.org/10.1109/TKDE.2008.108}, “Learning from imbalanced data,” IEEE Trans. Knowl . Data Eng., vol. 21, no. 9, pp. 1263–1284, 2009.
+\bibitem[ref6]{ref6}
+X. Yi, E. Walia, and P. Babyn, \url{https://doi.org/10.1016/j.media.2019.101552}, “Generative adversarial network in medical imaging: A review,” Med. Image Anal., vol. 58, Art. no. 101552, 2019.
+\bibitem[ref7]{ref7}
+L. R. Koetzier et al., \url{https://doi.org/10.1148/radiol.2023240232}, “Generating synthetic data for medical imaging,” Radiology, vol. 312, no. 3, Art. no. e232471, 2024.
+\bibitem[ref8]{ref8}
+T.-Y. Lin, P. Goyal, R. Girshick , K. He, and P. Dollár , \url{https://doi.org/10.1109/ICCV.2017.747}, “Focal loss for dense object detection,” in Proc. IEEE Int. Conf. Comput . Vis. (ICCV), 2017, pp. 2980–2988.
+\bibitem[ref9]{ref9}
+A. van den Oord, O. Vinyals , and K. Kavukcuoglu , \url{https://arxiv.org/abs/1703.10717}, “Neural discrete representation learning,” in Adv. Neural Inf. Process. Syst., vol. 30, 2017.
+\bibitem[ref10]{ref10}
+K. Ghosh, C. Bellinger, R. Corizzo , P. Branco, B. Krawczyk, and N. Japkowicz , \url{https://doi.org/10.1007/s10586-024-03551-8}, “The class imbalance problem in deep learning,” Mach. Learn., vol. 113, no. 7, pp. 4845–4901, 2024.
+\bibitem[ref11]{ref11}
+I. Araf, A. Idri , and I. Chairi , \url{https://doi.org/10.1007/s10462-024-10351-8}, “Cost-sensitive learning for imbalanced medical data: A review,” Artif . Intell . Rev., vol. 57, no. 4, Art. no. 80, 2024.
+\bibitem[ref12]{ref12}
+M. Salmi, D. Atif, D. Oliva, A. Abraham, and S. Ventura, \url{https://doi.org/10.1007/s10462-024-10352-7}, “Handling imbalanced medical datasets: Review of a decade of research,” Artif . Intell . Rev., vol. 57, no. 10, Art. no. 273, 2024.
+\bibitem[ref13]{ref13}
+M. Khushi, K. Shaukat, T. M. Alam, I. A. Hameed, S. Uddin, S. Luo, X. Yang, and M. C. Reyes, \url{https://doi.org/10.1109/ACCESS.2021.3055113}, “A comparative performance analysis of data resampling methods on imbalance medical data,” IEEE Access, vol. 9, pp. 109960–109975, 2021.
+\bibitem[ref14]{ref14}
+K. S. Krishna, B. D. Kumar, M. D. Reddy, C. H. Saketh, and G. Ramasamy, \url{https://doi.org/10.1109/AMATHE61652.2024.10582153}, “A multi-class classification framework with SMOTE based data augmentation technique for Alzheimer’s disease progression,” in Proc. 2024 Int. Conf. Advances in Modern Age Technologies for Health and Engineering Science (AMATHE), IEEE, 2024, pp. 1–6.
+\bibitem[ref15]{ref15}
+M. A. Aish, A. A. Ghafoor, F. Nasim, K. I. Ali, S. Akhter, and S. Azeem, \url{https://doi.org/10.1109/JCBI.2024.100000}, “Improving stroke prediction accuracy through machine learning and synthetic minority over-sampling,” J. Comput . Biomed. Inform., vol. 7, no. 2, 2024.
+\bibitem[ref16]{ref16}
+F. Gurcan and A. Soylu, \url{https://doi.org/10.3390/cancers16193417}, “Learning from imbalanced data: Integration of advanced resampling techniques and machine learning models for enhanced cancer diagnosis and prognosis,” Cancers, vol. 16, no. 19, Art. no. 3417, 2024.
+\bibitem[ref17]{ref17}
+S. Bacha, H. Ning, B. Mostefa , D. S. Sarwatt, and S. Dhelim , \url{https://doi.org/10.1016/j.knosys.2024.114403}, “A novel double pruning method for imbalanced data using information entropy and roulette wheel selection for breast cancer diagnosis,” Knowl .- Based Syst., vol. 330, Art. no. 114403, 2025
+\bibitem[ref18]{ref18}
+A. M. Sowjanya and O. Mrudula, \url{https://doi.org/10.1007/s42452-023-10451-4}, “Effective treatment of imbalanced datasets in health care using modified SMOTE coupled with stacked deep learning algorithms,” Appl. Nanosci ., vol. 13, no. 3, pp. 1829–1840, 2023.
+\bibitem[ref19]{ref19}
+A. Martinez-Velasco, L. Martínez-Villaseñor, and L. Miralles- Pechuán , \url{https://doi.org/10.1109/TLA.2024.10582153}, “Addressing class imbalance in healthcare data: Machine learning solutions for age-related macular degeneration and preeclampsia,” IEEE Latin Amer. Trans., vol. 22, no. 10, pp. 806–820, 2024.
+\bibitem[ref20]{ref20}
+H. Mohammedqasim , A. A. Jasim, R. Mohammedqasem , and O. Ata, \url{https://doi.org/10.11591/EST.V19.I2.598}, “Enhancing predictive performance in COVID-19 healthcare datasets: A case study based on hyper ADASYN over-sampling and genetic feature selection,” J. Eng. Sci. Technol., vol. 19, no. 2, pp. 598–617, Apr. 2024.
+\bibitem[ref21]{ref21}
+M. M. Chowdhury, R. S. Ayon, and M. S. Hossain, \url{https://doi.org/10.1016/j.hc.2024.100297}, “An investigation of machine learning algorithms and data augmentation techniques for diabetes diagnosis using class imbalanced BRFSS dataset,” Healthcare Analytics, vol. 5, Art. no. 100297, 2024.
+\bibitem[ref22]{ref22}
+U. Saha, I. U. Ahamed, M. A. Imran, I. U. Ahamed, A.-A. Hossain, and U. Das Gupta, \url{https://doi.org/10.1109/HealthCom60970.2024.10880715}, “YOLOv8-based deep learning approach for real-time skin lesion classification using the HAM10000 dataset,” in Proc. 2024 IEEE Int. Conf. E-health Netw ., Appl. Services ( HealthCom ), Nov. 2024, pp. 1–4.
+\bibitem[ref23]{ref23}
+M. Alsaidi, M. T. Jan, A. Altaher, H. Zhuang, and X. Zhu, \url{https://doi.org/10.1007/s11042-024-13351-8}, “Tackling the class imbalanced dermoscopic image classification using data augmentation and GAN,” Multimed . Tools Appl., vol. 83, no. 16, pp. 49121–49147, 2024.
+\bibitem[ref24]{ref24}
+N. A. Zebari, A. A. Alkurdi, R. B. Marqas , and M. S. Salih, \url{https://doi.org/10.26536/journal.njnu.v12i4p323}, “Enhancing brain tumor classification with data augmentation and DenseNet121,” Acad. J. Nawroz Univ., vol. 12, no. 4, pp. 323–334, 2023.
+\bibitem[ref25]{ref25}
+D. R. Beddiar, M. Oussalah , U. Muhammad, and T. Seppänen, \url{https://doi.org/10.1016/j.knosys.2023.110985}, “A deep learning based data augmentation method to improve COVID-19 detection from medical imaging,” Knowl .- Based Syst., vol. 280, Art. no. 110985, 2023.
+\bibitem[ref26]{ref26}
+F. Touazi , D. Gaceb, A. Tadrist , and S. Bakiri , \url{https://ceur-ws.org/Vol-3988/}, “Comparative evaluation of StyleGAN3-based augmentation strategies for enhanced medical image classification,” in Proceedings of the Eighth International Workshop on Computer Modeling and Intelligent Systems (CMIS 2025), CEUR Workshop Proceedings, vol. 3988, Zaporizhzhia, Ukraine, May 5, 2025, pp. 97–111 .
+\bibitem[ref27]{ref27}
+Q. Su, H. N. A. Hamed, M. A. Isa, X. Hao, and X. Dai, \url{https://doi.org/10.1109/ACCESS.2024.16498}, “A GAN-based data augmentation method for imbalanced multi-class skin lesion classification,” IEEE Access, vol. 12, pp. 16498–16513, 2024.
+\bibitem[ref28]{ref28}
+H. Ding, N. Huang, Y. Wu, and X. Cui, \url{https://doi.org/10.1109/TIM.2024.100000}, “LEGAN: Addressing intra-class imbalance in GAN-based medical image augmentation for improved imbalanced data classification,” IEEE Trans. Instrum . Meas., 2024.
+\bibitem[ref29]{ref29}
+T. Suresh, Z. Brijet, and T. Subha, \url{https://doi.org/10.1080/24693795.2023.2161111}, “Imbalanced medical disease dataset classification using enhanced generative adversarial network,” Comput . Methods Biomech . Biomed. Eng., vol. 26, no. 14, pp. 1702–1718, 2023.
+\bibitem[ref30]{ref30}
+H. Ding, N. Huang,
+\end{document}
